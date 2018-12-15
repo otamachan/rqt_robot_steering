@@ -30,14 +30,14 @@
 
 from __future__ import division
 import os
-import rospkg
 
 from geometry_msgs.msg import Twist
-import rospy
 from python_qt_binding import loadUi
 from python_qt_binding.QtCore import Qt, QTimer, Slot
 from python_qt_binding.QtGui import QKeySequence
 from python_qt_binding.QtWidgets import QShortcut, QWidget
+from qt_gui.ros_package_helper import get_package_path
+import rclpy
 from rqt_gui_py.plugin import Plugin
 
 
@@ -49,12 +49,12 @@ class RobotSteering(Plugin):
         super(RobotSteering, self).__init__(context)
         self.setObjectName('RobotSteering')
 
+        self._node = context.node
         self._publisher = None
 
         self._widget = QWidget()
-        rp = rospkg.RosPack()
         ui_file = os.path.join(
-            rp.get_path('rqt_robot_steering'), 'resource', 'RobotSteering.ui')
+            get_package_path('rqt_robot_steering'), 'share', 'rqt_robot_steering', 'resource', 'RobotSteering.ui')
         loadUi(ui_file, self._widget)
         self._widget.setObjectName('RobotSteeringUi')
         if context.serial_number() > 1:
@@ -180,10 +180,7 @@ class RobotSteering(Plugin):
         self._unregister_publisher()
         if topic == '':
             return
-        try:
-            self._publisher = rospy.Publisher(topic, Twist, queue_size=10)
-        except TypeError:
-            self._publisher = rospy.Publisher(topic, Twist)
+        self._publisher = self._node.create_publisher(Twist, topic)
 
     def _on_stop_pressed(self):
         # If the current value of sliders is zero directly send stop twist msg
@@ -269,10 +266,10 @@ class RobotSteering(Plugin):
             return
         twist = Twist()
         twist.linear.x = x_linear
-        twist.linear.y = 0
-        twist.linear.z = 0
-        twist.angular.x = 0
-        twist.angular.y = 0
+        twist.linear.y = 0.0
+        twist.linear.z = 0.0
+        twist.angular.x = 0.0
+        twist.angular.y = 0.0
         twist.angular.z = z_angular
 
         # Only send the zero command once so other devices can take control
@@ -286,7 +283,7 @@ class RobotSteering(Plugin):
 
     def _unregister_publisher(self):
         if self._publisher is not None:
-            self._publisher.unregister()
+            self._node.destroy_publisher(self._publisher)
             self._publisher = None
 
     def shutdown_plugin(self):
@@ -307,25 +304,31 @@ class RobotSteering(Plugin):
 
     def restore_settings(self, plugin_settings, instance_settings):
         value = instance_settings.value('topic', "/cmd_vel")
-        value = rospy.get_param("~default_topic", value)
+        value = self._get_param("default_topic", value)
         self._widget.topic_line_edit.setText(value)
 
         value = self._widget.max_x_linear_double_spin_box.value()
         value = instance_settings.value('vx_max', value)
-        value = rospy.get_param("~default_vx_max", value)
+        value = self._get_param("default_vx_max", value)
         self._widget.max_x_linear_double_spin_box.setValue(float(value))
 
         value = self._widget.min_x_linear_double_spin_box.value()
         value = instance_settings.value('vx_min', value)
-        value = rospy.get_param("~default_vx_min", value)
+        value = self._get_param("default_vx_min", value)
         self._widget.min_x_linear_double_spin_box.setValue(float(value))
 
         value = self._widget.max_z_angular_double_spin_box.value()
         value = instance_settings.value('vw_max', value)
-        value = rospy.get_param("~default_vw_max", value)
+        value = self._get_param("default_vw_max", value)
         self._widget.max_z_angular_double_spin_box.setValue(float(value))
 
         value = self._widget.min_z_angular_double_spin_box.value()
         value = instance_settings.value('vw_min', value)
-        value = rospy.get_param("~default_vw_min", value)
+        value = self._get_param("default_vw_min", value)
         self._widget.min_z_angular_double_spin_box.setValue(float(value))
+
+    def _get_param(self, name, value):
+        param = self._node.get_parameter(name)
+        if param.value is not None:
+            return param.value
+        return value
